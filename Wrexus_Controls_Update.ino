@@ -52,16 +52,16 @@ class SwitchOnOff {
 };
 
 class InteriorLight {
-  // Variables
+  private:
     byte stripSelect; // Choose which neopixel strip this lives on | 0=strip
     byte startingPixel; // first (or only) pixel in this related group
     byte numberOfPixels; // Number of pixels related to this group
 
   public:
-    InteriorLight(byte stripSelectAssign, byte startingPixelAssign, byte numberOfPixelsAssign){
-      stripSelect = stripSelectAssign;
-      startingPixel = startingPixelAssign;
-      numberOfPixels = numberOfPixelsAssign;
+    InteriorLight(byte stripSelect, byte startingPixel, byte numberOfPixels){
+      this->stripSelect = stripSelect;
+      this->startingPixel = startingPixel;
+      this->numberOfPixels = numberOfPixels;
     }
 
     // Methods
@@ -80,7 +80,40 @@ class InteriorLight {
           break;
       }
     }
+};
 
+class RelayControledDevice { // input values (output pin number [number], activation signal [0=low signal activation, 1=high signal activation])
+  private:
+    byte pin;
+    byte signalType;
+
+  public:
+    RelayControledDevice(byte pin, byte signalType){
+      this->pin = pin;
+      this->signalType = signalType;
+      init();
+    }
+
+    void init(){
+      pinMode(pin, OUTPUT);
+      off();
+    }
+
+    void on(){
+      if(signalType){
+        digitalWrite(pin, HIGH);
+      } else {
+        digitalWrite(pin, LOW);
+      }
+    }
+
+    void off(){
+      if(signalType){
+        digitalWrite(pin, LOW);
+      } else {
+        digitalWrite(pin, HIGH);
+      }
+    }
 };
 
 // Create Objects
@@ -107,7 +140,7 @@ SwitchOnOffOn switchDomeLightSelect;
 SwitchOnOff switchPassengerMapLight;
 
 // Lights
-InteriorLight indicatorBumperLightBar(0,0,1);
+InteriorLight indicatorBumperLightBar(0,0,1);// Strip ID | First LED Address | # of associated LEDs
 InteriorLight indicatorMainLightBar(0,1,1);
 InteriorLight indicatorSideLightBars(0,2,1);
 InteriorLight indicatorRearLightBar(0,3,1);
@@ -118,6 +151,12 @@ InteriorLight areaLightDriversMap(0,7,4);
 InteriorLight areaLightDriversDome(0,11,8);
 InteriorLight areaLightPassengerDome(0,19,8);
 InteriorLight areaLightPassengerMap(0,27,4);
+
+// Relay controled items
+RelayControledDevice lightMainBar(52,0); // Relay 0: Pin number | Signal type 0=low signal activation, 1=high signal activation
+RelayControledDevice lightRight(50,0); // Relay 1
+RelayControledDevice lightLeft(48,0); // Relay 2
+RelayControledDevice lightRear(46,0); // Relay 3
 
 // Define Connections to 74HC165N used inreadInputs()
 #define LOAD_PIN      23 // PL pin 1
@@ -153,12 +192,6 @@ byte Shift_0Last = 0; // Hold the last value of the shift register to determine 
 // Define Toggle Switch Variables/Constants
 boolean InputUpdated = false; // Latch to skip updateOutputs()
 
-// Define light relay pins
-// Relays are active LOW.  Write LOW on the pin to close relay and turn light ON
-#define RELAY_MAIN_LIGHT  52  // Relay 0
-#define RELAY_RIGHT_LIGHT 50  // Relay 1
-#define RELAY_LEFT_LIGHT  48  // Relay 2
-#define RELAY_REAR_LIGHTS 46  // Relay 3
 
 
 void setup() {
@@ -196,19 +229,13 @@ void setup() {
   }
 
   // Fill the HUD with the initial color.
-  strip.fill(hudColor, 0, 7);
-
-  // Setup light relay pins
-  pinMode(RELAY_MAIN_LIGHT, OUTPUT);
-  pinMode(RELAY_RIGHT_LIGHT, OUTPUT);
-  pinMode(RELAY_LEFT_LIGHT, OUTPUT);
-  pinMode(RELAY_REAR_LIGHTS, OUTPUT);
-
-  // Set initial state of relay pins to off.  Relays are active LOW
-  digitalWrite(RELAY_MAIN_LIGHT, HIGH);
-  digitalWrite(RELAY_RIGHT_LIGHT, HIGH);
-  digitalWrite(RELAY_LEFT_LIGHT, HIGH);
-  digitalWrite(RELAY_REAR_LIGHTS, HIGH);
+  indicatorBumperLightBar.updateColor(hudColor);
+  indicatorMainLightBar.updateColor(hudColor);
+  indicatorSideLightBars.updateColor(hudColor);
+  indicatorRearLightBar.updateColor(hudColor);
+  indicatorGMRSRadio.updateColor(hudColor);
+  indicatorTunesRadio.updateColor(hudColor);
+  indicatorNightSignal.updateColor(hudColor);
 }
 
 
@@ -437,11 +464,11 @@ void readInputs(){
 void calculations(){
   // Update the HUD base color
   if(switchNightSignal.checkState() == ON){
-    hudColor = strip.Color(255, 0, 0, 0); // Set hud color to red
+    hudColor = red;
     HUDbrightness = 51; // Set brightness to 1/5
 
   } else if(switchNightSignal.checkState() == OFF){
-    hudColor = strip.Color(0, 0, 0, 255); // Set hud color to white
+    hudColor = white;
     HUDbrightness = 255; // Set brightness to full
   } else {
     // Auto control at later date
@@ -656,7 +683,7 @@ void updateOutputs(){
   // Main Light Bar
   if(allOnDecision){ // Force light on if All On mode is active
     indicatorMainLightBar.updateColor(green);
-    digitalWrite(RELAY_MAIN_LIGHT, LOW); // Turn on Light
+    lightMainBar.on();
   } else {
     switch (switchMainLightBar.checkState()) {
       case ON:
@@ -665,7 +692,7 @@ void updateOutputs(){
           Serial.println("Switch 01 - ON   - Main Light Bar");
         }
         indicatorMainLightBar.updateColor(green);
-        digitalWrite(RELAY_MAIN_LIGHT, LOW); // Turn on Light
+        lightMainBar.on();
         break;
       case OFF:
         // Print debug message
@@ -673,7 +700,7 @@ void updateOutputs(){
           Serial.println("Switch 01 - OFF  - Main Light Bar");
         }
         indicatorMainLightBar.updateColor(hudColor);
-        digitalWrite(RELAY_MAIN_LIGHT, HIGH); // Turn off Light
+        lightMainBar.off();
         break;
       case AUTO:
         // Print debug message
@@ -719,13 +746,13 @@ void updateOutputs(){
         indicatorSideLightBars.updateColor(orange);
         //Decisions for Auto TBD
         break;
-    }    
+    }
   }
 
   // Rear Light Bar
   if(allOnDecision){ // Force light on if All On mode is active
     indicatorRearLightBar.updateColor(green);
-    digitalWrite(RELAY_REAR_LIGHTS, LOW); // Turn on rear lights
+    lightRear.on();
   } else {
     switch (switchRearLightBar.checkState()) {
       case ON:
@@ -734,7 +761,7 @@ void updateOutputs(){
           Serial.println("Switch 03 - ON   - Rear Light Bar");
         }
         indicatorRearLightBar.updateColor(green);
-        digitalWrite(RELAY_REAR_LIGHTS, LOW); // Turn on rear lights
+        lightRear.on();
         break;
       case OFF:
         // Print debug message
@@ -742,7 +769,7 @@ void updateOutputs(){
           Serial.println("Switch 03 - OFF  - Rear Light Bar");
         }
         indicatorRearLightBar.updateColor(hudColor);
-        digitalWrite(RELAY_REAR_LIGHTS, HIGH); // Turn on rear lights
+        lightRear.off();
         break;
       case AUTO:
         // Print debug message
@@ -752,7 +779,7 @@ void updateOutputs(){
         indicatorRearLightBar.updateColor(orange);
         //Decisions for Auto TBD
         break;
-    }    
+    }
   }
 
   // GMRS Radio
@@ -938,37 +965,39 @@ void updateOutputs(){
 
   // Evaluate right light relay (relay 1)
   if (rightLightDecision == true) {
-    digitalWrite(RELAY_RIGHT_LIGHT, LOW); // Turn right light on
+    lightRight.on();
   } else {
-    digitalWrite(RELAY_RIGHT_LIGHT, HIGH); // Turn right light off
+    lightRight.off();
   }
 
   // Evaluate left light relay (relay 2)
   if (leftLightDecision == true) {
-    digitalWrite(RELAY_LEFT_LIGHT, LOW); // Turn left light on
+    lightLeft.on();
   } else {
-    digitalWrite(RELAY_LEFT_LIGHT, HIGH); // Turn left light off
+    lightLeft.off();
   }
 
   // Evaluate Drivers side map light
   if (driversSideMapLightDecision or domeLightDecision){
-    strip.fill(white, 7, 4);
+    areaLightDriversMap.updateColor(white);
   } else {
-    strip.fill(off, 7, 4);
+    areaLightDriversMap.updateColor(off);
   }
 
   // Evaluate dome light
   if (domeLightDecision){
-    strip.fill(white, 11, 16);
+    areaLightDriversDome.updateColor(white);
+    areaLightPassengerDome.updateColor(white);
   } else {
-    strip.fill(off, 11, 16);
+    areaLightDriversDome.updateColor(off);
+    areaLightPassengerDome.updateColor(off);
   }
 
   // Evaluate passengers side map light
   if (passengersSideMapLightDecision or domeLightDecision){
-    strip.fill(white, 27, 4);
+    areaLightPassengerMap.updateColor(white);
   } else {
-    strip.fill(off, 27, 4);
+    areaLightPassengerMap.updateColor(off);
   }
 
   // Update 5v Output Shift Registers if a change has happened
