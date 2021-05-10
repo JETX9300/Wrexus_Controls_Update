@@ -4,17 +4,25 @@
 // Debug Mode Select
 boolean debug = false; // Change to true will allow messages to print to the serial monitor
 
-// Define Connections to 74HC165N
+// Define connections to 74HC165N - Input Shift Registers
 #define LOAD_PIN      23 // PL pin 1
 #define CLK_ENAB_PIN  25 // CE pin 15
 #define DATA_IN_PIN   27 // Q7 pin 9
 #define CLK_IN_PIN    29 // CP pin 2
 
-// Define Shift Register Variables/Constants
+// Define Input Shift Register variables/constants
 #define NUM_SHIFT_INPUTS 32 // Number of individual inputs coming in from the shift registers
-boolean currentShiftInput[NUM_SHIFT_INPUTS]; // Array to hold the individual values of incoming shift register values | 0-7 = shift_0, 8-15 = shift_1, 16-23 = shift_2
+boolean currentShiftInput[NUM_SHIFT_INPUTS]; // Array to hold the individual values of incoming shift register values | 0-7 = shift_0, 8-15 = shift_1, 16-23 = shift_2, 24-31 = shift_3
 boolean lastShiftInput[NUM_SHIFT_INPUTS]; // Array to hold the previous values of incoming shift register values
-boolean shiftInputDebounce[NUM_SHIFT_INPUTS]; // Array to hold the number of times the new value of the 
+boolean shiftInputDebounce[NUM_SHIFT_INPUTS]; // Array to hold the number of times the new value of the
+
+// Define connections to 74HC595 - 5v Output Shift Registers
+#define LATCH_PIN     35 // RCLK  pin 12
+#define CLOCK_PIN     37 // SRCLK pin 11
+#define DATA_PIN      33 // SER   pin 14
+
+// Define 5v Output Shift Register variables/constants
+byte Shift_0Last = 0; // Hold the last value of the shift register to determine when to run the update code
 
 // Define FastLED Variables/Constants FASTLED
 //#define LED_TYPE          WS2812  // type of RGB LEDs
@@ -54,10 +62,10 @@ boolean InputUpdated = false; // Latch to skip updateOutputs()
 
 // Define light relay pins
 // Relays are active LOW.  Write LOW on the pin to close relay and turn light ON
-//#define RELAY_MAIN_LIGHT  52  // Relay 0
-//#define RELAY_RIGHT_LIGHT 50  // Relay 1
-//#define RELAY_LEFT_LIGHT  48  // Relay 2
-//#define RELAY_REAR_LIGHTS 46  // Relay 3
+#define RELAY_MAIN_LIGHT  52  // Relay 0
+#define RELAY_RIGHT_LIGHT 50  // Relay 1
+#define RELAY_LEFT_LIGHT  48  // Relay 2
+#define RELAY_REAR_LIGHTS 46  // Relay 3
 
 
 void setup() {
@@ -70,11 +78,21 @@ void setup() {
   // initialize library using CRGB LED array FASTLED
   //FastLED.addLeds<LED_TYPE,DATA_PIN,COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
 
-  // Setup 74HC165 Connections
+  // Setup Input Shift Register connections
   pinMode(LOAD_PIN, OUTPUT);
   pinMode(CLK_ENAB_PIN, OUTPUT);
   pinMode(CLK_IN_PIN, OUTPUT);
   pinMode(DATA_IN_PIN, INPUT);
+
+  // Setup 5v Output Shift Registers connections
+  pinMode(LATCH_PIN, OUTPUT);
+  pinMode(CLOCK_PIN, OUTPUT);
+  pinMode(DATA_PIN, OUTPUT);
+
+  // Send 5v Output Shift Registers their initial value
+  digitalWrite(LATCH_PIN, LOW); // Bring RCLK LOW to keep outputs from changing while reading serial data
+  shiftOut(DATA_PIN, CLOCK_PIN, LSBFIRST, 0); // Shift out the data
+  digitalWrite(LATCH_PIN, HIGH); // Bring RCLK HIGH to change outputs
 
   // Fill arrays with starting values
   for(size_t cv = 0; cv < NUM_SHIFT_INPUTS; cv++){
@@ -91,16 +109,16 @@ void setup() {
   strip.fill(hudColor, 0, 7);
 
   // Setup light relay pins
-  //pinMode(RELAY_MAIN_LIGHT, OUTPUT);
-  //pinMode(RELAY_RIGHT_LIGHT, OUTPUT);
-  //pinMode(RELAY_LEFT_LIGHT, OUTPUT);
-  //pinMode(RELAY_REAR_LIGHTS, OUTPUT);
+  pinMode(RELAY_MAIN_LIGHT, OUTPUT);
+  pinMode(RELAY_RIGHT_LIGHT, OUTPUT);
+  pinMode(RELAY_LEFT_LIGHT, OUTPUT);
+  pinMode(RELAY_REAR_LIGHTS, OUTPUT);
 
   // Set initial state of relay pins to off.  Relays are active LOW
-  //digitalWrite(RELAY_MAIN_LIGHT, HIGH);
-  //digitalWrite(RELAY_RIGHT_LIGHT, HIGH);
-  //digitalWrite(RELAY_LEFT_LIGHT, HIGH);
-  //digitalWrite(RELAY_REAR_LIGHTS, HIGH);
+  digitalWrite(RELAY_MAIN_LIGHT, HIGH);
+  digitalWrite(RELAY_RIGHT_LIGHT, HIGH);
+  digitalWrite(RELAY_LEFT_LIGHT, HIGH);
+  digitalWrite(RELAY_REAR_LIGHTS, HIGH);
 }
 
 
@@ -352,9 +370,21 @@ void updateOutputs(){
   // Create Temporary Variables
   boolean rightLightDecision = false; // Variable to evaluate turning on the right light relay
   boolean leftLightDecision = false; // Variable to evaluate turning on the left light relay
+  boolean rearLightDecision = false; // Variable to evaluate turning on the Rear light relay
   boolean driversSideMapLightDecision = false; // Variable to evaluate turning on the Drivers side map light
   boolean passengersSideMapLightDecision = false; // Variable to evaluate turning on the Passengers side map light
   boolean domeLightDecision = false; // Variable to evaluate turning on the dome light
+  boolean allOnDecision = false; // Variable to evaluate turning all lights on
+  byte Shift_0Current = 0; // Binary enumerated value to update the 5v Output Shift Registers
+  //boolean 595OutputUpdate = false; // Flag to activate 5v Output Shift Registers update code
+
+  /*
+  Shift Register Values
+  Output  Value   Name
+  1       128     GMRS Radio
+  2       64      Tunes Radio
+  3       32      Night Signal
+  */
   
   // ---Human Inputs---
   
@@ -372,117 +402,270 @@ void updateOutputs(){
   // Update current brightness
   strip.setBrightness(HUDbrightness);
   
+   // ----Mode Inputs----
+
+   // Off Road Mode
+   switch (switchPosition[8]) {
+     case ON:
+       // Print debug message
+       if (debug) {
+         Serial.println("Switch 08 - ON   - Off Road Mode");
+       }
+       // Add Functionalality
+       break;
+     case OFF:
+       // Print debug message
+       if (debug) {
+         Serial.println("Switch 08 - OFF  - Off Road Mode");
+       }
+       // Add Functionalality
+       break;
+   }
+   
+   // Hazard Mode
+   switch (switchPosition[9]) {
+     case ON:
+       // Print debug message
+       if (debug) {
+         Serial.println("Switch 09 - ON   - Hazard Mode");
+       }
+       // Add Functionalality
+       break;
+     case OFF:
+       // Print debug message
+       if (debug) {
+         Serial.println("Switch 09 - OFF  - Hazard Mode");
+       }
+       // Add Functionalality
+       break;
+   }
+   
+   // Observatory Mode
+   switch (switchPosition[10]) {
+     case ON:
+       // Print debug message
+       if (debug) {
+         Serial.println("Switch 10 - ON   - Observatory Mode");
+       }
+       // Add Functionalality
+       break;
+     case OFF:
+       // Print debug message
+       if (debug) {
+         Serial.println("Switch 10 - OFF  - Observatory Mode");
+       }
+       // Add Functionalality
+       break;
+   }
+   
+   // All On Mode
+   switch (switchPosition[11]) {
+     case ON:
+       // Print debug message
+       if (debug) {
+         Serial.println("Switch 11 - ON   - All On Mode");
+       }
+       allOnDecision = true;
+       break;
+     case OFF:
+       // Print debug message
+       if (debug) {
+         Serial.println("Switch 11 - OFF  - All On Mode");
+       }
+       allOnDecision = false;
+       break;
+   }
+   
+   // Offroad Mode Light Pattern Select
+   switch (switchPosition[12]) {
+     case NEXT:
+       // Print debug message
+       if (debug) {
+         Serial.println("Switch 12 - NEXT - Offroad Mode Light Pattern Select");
+       }
+       // Add Functionalality
+       break;
+     case OFF:
+       // Print debug message
+       if (debug) {
+         Serial.println("Switch 12 - OFF  - Offroad Mode Light Pattern Select");
+       }
+       // Add Functionalality
+       break;
+     case PREVIOUS:
+       // Print debug message
+       if (debug) {
+         Serial.println("Switch 12 - PREV - Offroad Mode Light Pattern Select");
+       }
+       // Add Functionalality
+       break;
+   }
+   
+   // Hazard Mode Direction Choice
+   switch (switchPosition[13]) {
+     case LEFT:
+       // Print debug message
+       if (debug) {
+         Serial.println("Switch 13 - LEFT - Hazard Mode Direction Choice");
+       }
+       // Add Functionalality
+       break;
+     case CENTER:
+       // Print debug message
+       if (debug) {
+         Serial.println("Switch 13 - CENT - Hazard Mode Direction Choice");
+       }
+       // Add Functionalality
+       break;
+     case RIGHT:
+       // Print debug message
+       if (debug) {
+         Serial.println("Switch 13 - RIGT - Hazard Mode Direction Choice");
+       }
+       // Add Functionalality
+       break;
+   }
+
+
+
+   // ----Device Inputs----
+
+
+
   // Bumper Light Bar
-  switch (switchPosition[0]) {
-    case ON: 
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 00 - ON   - Bumper Light Bar");
-      }
-      strip.setPixelColor(0,0,255,0,0); // Update Indicator
-      break;
-    case OFF:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 00 - OFF  - Bumper Light Bar");
-      }
-      strip.setPixelColor(0,hudColor); // Update Indicator
-      break;
-    case AUTO:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 00 - AUTO - Bumper Light Bar");
-      }
-      strip.setPixelColor(0,255,165,0,0); // Update Indicator
-      break;
-  }
-
-  // Main Light Bar
-  switch (switchPosition[1]) {
-    case ON:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 01 - ON   - Main Light Bar");
-      }
-      strip.setPixelColor(1,0,255,0,0); // Update Indicator
-      //digitalWrite(RELAY_MAIN_LIGHT, LOW); // Turn on Light
-      break;
-    case OFF:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 01 - OFF  - Main Light Bar");
-      }
-      strip.setPixelColor(1,hudColor); // Update Indicator
-      //digitalWrite(RELAY_MAIN_LIGHT, HIGH); // Turn off Light
-      break;
-    case AUTO:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 01 - AUTO - Main Light Bar");
-      }
-      strip.setPixelColor(1,255,165,0,0); // Update Indicator
-      //Decisions for Auto TBD
-      break;
-  }
-
-  // Side Light Bars
-  switch (switchPosition[2]) {
-    case ON:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 02 - ON   - Side Lights");
-      }
-      strip.setPixelColor(2,0,255,0,0); // Update Indicator
-      rightLightDecision = true; // Create and store a value to only fire relays once in Momentary Section
-      leftLightDecision = true; // Call to turn on both lights
-      break;
-    case OFF:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 02 - OFF  - Side Lights");
-      }
-      strip.setPixelColor(2,hudColor); //Update Indicator
-      rightLightDecision = false; // Call to turn off both lights
-      leftLightDecision = false;
-      break;
-    case AUTO:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 02 - AUTO - Side Lights");
-      }
-      strip.setPixelColor(2,255,165,0,0); // Update Indicator
-      //Decisions for Auto TBD
-      break;
+  if (allOnDecision) { // If All once Mode is active, force the light on
+    strip.setPixelColor(0,0,255,0,0); // Update Indicator
+  } else {
+    switch (switchPosition[0]) {
+      case ON: 
+        // Print debug message
+        if (debug) {
+          Serial.println("Switch 00 - ON   - Bumper Light Bar");
+        }
+        strip.setPixelColor(0,0,255,0,0); // Update Indicator
+        break;
+      case OFF:
+        // Print debug message
+        if (debug) {
+          Serial.println("Switch 00 - OFF  - Bumper Light Bar");
+        }
+        strip.setPixelColor(0,hudColor); // Update Indicator
+        break;
+      case AUTO:
+        // Print debug message
+        if (debug) {
+          Serial.println("Switch 00 - AUTO - Bumper Light Bar");
+        }
+        strip.setPixelColor(0,255,165,0,0); // Update Indicator
+        break;
+    }
   }
   
-  // Rear Light Bar
-  switch (switchPosition[3]) {
-    case ON:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 03 - ON   - Rear Light Bar");
-      }
-      strip.setPixelColor(3,0,255,0,0); // Update Indicator
-      //digitalWrite(RELAY_REAR_LIGHTS, LOW); // Turn on rear lights
-      break;
-    case OFF:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 03 - OFF  - Rear Light Bar");
-      }
-      strip.setPixelColor(3,hudColor); //Update Indicator
-      //digitalWrite(RELAY_REAR_LIGHTS, HIGH); // Turn on rear lights
-      break;
-    case AUTO:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 03 - AUTO - Rear Light Bar");
-      }
-      strip.setPixelColor(3,255,165,0,0); // Update Indicator
-      //Decisions for Auto TBD
-      break;
-  }
 
+  // Main Light Bar
+  if (allOnDecision) { // If All once Mode is active, force the light on
+    strip.setPixelColor(1,0,255,0,0); // Update Indicator
+    digitalWrite(RELAY_MAIN_LIGHT, LOW); // Turn Main light on
+  } else {
+    switch (switchPosition[1]) {
+      case ON:
+        // Print debug message
+        if (debug) {
+          Serial.println("Switch 01 - ON   - Main Light Bar");
+        }
+        strip.setPixelColor(1,0,255,0,0); // Update Indicator
+        digitalWrite(RELAY_MAIN_LIGHT, LOW); // Turn Main light on
+        break;
+      case OFF:
+        // Print debug message
+        if (debug) {
+          Serial.println("Switch 01 - OFF  - Main Light Bar");
+        }
+        strip.setPixelColor(1,hudColor); // Update Indicator
+        digitalWrite(RELAY_MAIN_LIGHT, HIGH); // Turn Main light off
+        break;
+      case AUTO:
+        // Print debug message
+        if (debug) {
+          Serial.println("Switch 01 - AUTO - Main Light Bar");
+        }
+        strip.setPixelColor(1,255,165,0,0); // Update Indicator
+        //Decisions for Auto TBD
+        break;
+    }
+  }
+  
+
+  // Side Light Bars
+  if (allOnDecision) { // If All once Mode is active, force the light on
+    strip.setPixelColor(2,0,255,0,0); // Update Indicator
+    rightLightDecision = true; // Set flag to evaluate relay later
+    leftLightDecision = true; // Set flag to evaluate relay later
+  } else {
+    switch (switchPosition[2]) {
+      case ON:
+        // Print debug message
+        if (debug) {
+          Serial.println("Switch 02 - ON   - Side Lights");
+        }
+        strip.setPixelColor(2,0,255,0,0); // Update Indicator
+        rightLightDecision = true; // Set flag to evaluate relay later
+        leftLightDecision = true; // Set flag to evaluate relay later
+        break;
+      case OFF:
+        // Print debug message
+        if (debug) {
+          Serial.println("Switch 02 - OFF  - Side Lights");
+        }
+        strip.setPixelColor(2,hudColor); //Update Indicator
+        rightLightDecision = false; // Call to turn off both lights
+        leftLightDecision = false;
+        break;
+      case AUTO:
+        // Print debug message
+        if (debug) {
+          Serial.println("Switch 02 - AUTO - Side Lights");
+        }
+        strip.setPixelColor(2,255,165,0,0); // Update Indicator
+        //Decisions for Auto TBD
+        break;
+    }
+  }
+  
+  
+  // Rear Light Bar
+  if (allOnDecision) { // If All once Mode is active, force the light on
+    strip.setPixelColor(3,0,255,0,0); // Update Indicator
+    digitalWrite(RELAY_REAR_LIGHTS, LOW); // Turn on rear lights
+  } else {
+    switch (switchPosition[3]) {
+      case ON:
+        // Print debug message
+        if (debug) {
+          Serial.println("Switch 03 - ON   - Rear Light Bar");
+        }
+        strip.setPixelColor(3,0,255,0,0); // Update Indicator
+        digitalWrite(RELAY_REAR_LIGHTS, LOW); // Turn on rear lights
+        break;
+      case OFF:
+        // Print debug message
+        if (debug) {
+          Serial.println("Switch 03 - OFF  - Rear Light Bar");
+        }
+        strip.setPixelColor(3,hudColor); //Update Indicator
+        digitalWrite(RELAY_REAR_LIGHTS, HIGH); // Turn on rear lights
+        break;
+      case AUTO:
+        // Print debug message
+        if (debug) {
+          Serial.println("Switch 03 - AUTO - Rear Light Bar");
+        }
+        strip.setPixelColor(3,255,165,0,0); // Update Indicator
+        //Decisions for Auto TBD
+        break;
+    }
+  }
+  
   // GMRS Radio
   switch (switchPosition[4]) {
     case ON:
@@ -490,13 +673,16 @@ void updateOutputs(){
       if (debug) {
         Serial.println("Switch 04 - ON   - GMRS Radio");
       }
+      
       strip.setPixelColor(4,0,255,0,0); // Update Indicator
+
+      Shift_0Current = Shift_0Current + 128; // Add corresponding enumerated value to build 5v Output Shift Registers data
       break;
     case OFF:
       // Print debug message
       if (debug) {
         Serial.println("Switch 04 - OFF  - GMRS Radio");
-      }
+        }
       strip.setPixelColor(4,hudColor); // Update Indicator
       break;
     case AUTO:
@@ -515,7 +701,11 @@ void updateOutputs(){
       if (debug) {
         Serial.println("Switch 05 - ON   - Tunes Radio");
       }
+      
       strip.setPixelColor(5,0,255,0,0); // Update Indicator
+
+      Shift_0Current = Shift_0Current + 64; // Add corresponding enumerated value to build 5v Output Shift Registers data
+      
       break;
     case OFF:
       // Print debug message
@@ -540,7 +730,11 @@ void updateOutputs(){
       if (debug) {
         Serial.println("Switch 06 - ON   - Night Signal");
       }
+      
       strip.setPixelColor(6,0,255,0,0); // Update Indicator
+
+      Shift_0Current = Shift_0Current + 32; // Add corresponding enumerated value to build 5v Output Shift Registers data
+      
       break;
     case OFF:
       // Print debug message
@@ -582,128 +776,6 @@ void updateOutputs(){
       }
       strip.setPixelColor(2,0,255,0,0); //Update Indicator
       rightLightDecision = true; // Call to turn right light on
-      break;
-  }
-
-  // Off Road Mode
-  switch (switchPosition[8]) {
-    case ON:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 08 - ON   - Off Road Mode");
-      }
-      // Add Functionalality
-      break;
-    case OFF:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 08 - OFF  - Off Road Mode");
-      }
-      // Add Functionalality
-      break;
-  }
-
-  // Hazard Mode
-  switch (switchPosition[9]) {
-    case ON:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 09 - ON   - Hazard Mode");
-      }
-      // Add Functionalality
-      break;
-    case OFF:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 09 - OFF  - Hazard Mode");
-      }
-      // Add Functionalality
-      break;
-  }
-
-  // Observatory Mode
-  switch (switchPosition[10]) {
-    case ON:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 10 - ON   - Observatory Mode");
-      }
-      // Add Functionalality
-      break;
-    case OFF:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 10 - OFF  - Observatory Mode");
-      }
-      // Add Functionalality
-      break;
-  }
-
-  // All On Mode
-  switch (switchPosition[11]) {
-    case ON:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 11 - ON   - All On Mode");
-      }
-      // Add Functionalality
-      break;
-    case OFF:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 11 - OFF  - All On Mode");
-      }
-      // Add Functionalality
-      break;
-  }
-
-  // Offroad Mode Light Pattern Select
-  switch (switchPosition[12]) {
-    case NEXT:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 12 - NEXT - Offroad Mode Light Pattern Select");
-      }
-      // Add Functionalality
-      break;
-    case OFF:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 12 - OFF  - Offroad Mode Light Pattern Select");
-      }
-      // Add Functionalality
-      break;
-    case PREVIOUS:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 12 - PREV - Offroad Mode Light Pattern Select");
-      }
-      // Add Functionalality
-      break;
-  }
-
-  // Hazard Mode Direction Choice
-  switch (switchPosition[13]) {
-    case LEFT:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 13 - LEFT - Hazard Mode Direction Choice");
-      }
-      // Add Functionalality
-      break;
-    case CENTER:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 13 - CENT - Hazard Mode Direction Choice");
-      }
-      // Add Functionalality
-      break;
-    case RIGHT:
-      // Print debug message
-      if (debug) {
-        Serial.println("Switch 13 - RIGT - Hazard Mode Direction Choice");
-      }
-      // Add Functionalality
       break;
   }
 
@@ -782,17 +854,17 @@ void updateOutputs(){
   // ---Final evaluations---
 
   // Evaluate right light relay (relay 1)
-  if (rightLightDecision == true) {
-    //digitalWrite(RELAY_RIGHT_LIGHT, LOW); // Turn right light on
+  if (rightLightDecision or allOnDecision) {
+    digitalWrite(RELAY_RIGHT_LIGHT, LOW); // Turn right light on
   } else {
-    //digitalWrite(RELAY_RIGHT_LIGHT, HIGH); // Turn right light off
+    digitalWrite(RELAY_RIGHT_LIGHT, HIGH); // Turn right light off
   }
 
   // Evaluate left light relay (relay 2)
-  if (leftLightDecision == true) {
-    //digitalWrite(RELAY_LEFT_LIGHT, LOW); // Turn left light on
+  if (leftLightDecision or allOnDecision) {
+    digitalWrite(RELAY_LEFT_LIGHT, LOW); // Turn left light on
   } else {
-    //digitalWrite(RELAY_LEFT_LIGHT, HIGH); // Turn left light off
+    digitalWrite(RELAY_LEFT_LIGHT, HIGH); // Turn left light off
   }
 
   // Evaluate Drivers side map light
@@ -814,6 +886,20 @@ void updateOutputs(){
     strip.fill(white, 27, 4);
   } else {
     strip.fill(off, 27, 4);
+  }
+
+  // Update 5v Output Shift Registers if a change has happened
+  if (Shift_0Current != Shift_0Last) {
+    
+    // Write to outputs
+    Serial.println(Shift_0Current, BIN);
+    digitalWrite(LATCH_PIN, LOW); // Bring RCLK LOW to keep outputs from changing while reading serial data
+
+    shiftOut(DATA_PIN, CLOCK_PIN, LSBFIRST, Shift_0Current); // Shift out the data
+
+    digitalWrite(LATCH_PIN, HIGH); // Bring RCLK HIGH to change outputs
+
+    Shift_0Last = Shift_0Current; // Store current value
   }
 
   InputUpdated = false; // Turn off flag to keep UpdateOutputs() from running when nothing has changed.
