@@ -884,7 +884,7 @@ void updateOutputs(){
       if (debug) {
         Serial.println("Switch 07 - RIGT - Side Light Bars Momentary");
       }
-      indicatorSideLightBars.updateColor(orange);
+      indicatorSideLightBars.updateColor(green);
       rightLightDecision = true; // Call to turn right light on
       break;
   }
