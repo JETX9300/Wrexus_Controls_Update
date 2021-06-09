@@ -68,17 +68,38 @@ class BumperLight {
     }
 
     byte halfWidth(){
-      byte toReturn = (width() / 2) + 1;
+      byte toReturn;
+
+      if(lastLedAddress == 12){
+        toReturn = (width() / 2);
+      } else {
+        toReturn = (width() / 2) + 1;
+      }
+
       return toReturn;
     }
 
     byte leftWrap(){
-      byte toReturn = upperMidPoint() - lowerMidPoint() + 1;
+      byte toReturn;
+
+      if(lastLedAddress == 12){
+        toReturn = upperMidPoint() - lowerMidPoint();
+      } else {
+        toReturn = upperMidPoint() - lowerMidPoint() + 1;
+      }
+
       return toReturn;
     }
 
     byte rightWraps(){
-      byte toReturn = (upperMidPoint() - lowerMidPoint()) / 2 + 1;
+      byte toReturn;
+
+      if(lastLedAddress == 12){
+        toReturn = (upperMidPoint() - lowerMidPoint()) / 2;
+      } else {
+        toReturn = (upperMidPoint() - lowerMidPoint()) / 2 + 1;
+      }
+
       return toReturn;
     }
 
